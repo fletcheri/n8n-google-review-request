@@ -30,7 +30,7 @@ The **Pro pack** adds:
 - duplicate-job protection by job reference, a per-run cap for big imports, and a status page with click rate
 - an AU compliance guide (Spam Act, Google policy, ACCC), setup docs and test scripts
 
-**Want the full Australian version?** The Google Review Request Pack (Pro) adds email, click tracking, a single smart reminder, reply forwarding, holidays, ClickSend and full setup docs. Store link coming soon; questions to aussieflows@mail.grokbot.com.
+**Want the full Australian version?** The Google Review Request Pack (Pro) adds email, click tracking, a single smart reminder, reply forwarding, holidays, ClickSend and full setup docs. [Get the Pro pack on Polar](https://buy.polar.sh/polar_cl_5d42FI2UWQn9yt5LSqyZHdkg7NLX6TtSPzG5s4UbXJ0); questions to aussieflows@mail.grokbot.com.
 
 [Notify me when Pro is out](mailto:aussieflows@mail.grokbot.com?subject=Notify%20me%20-%20Google%20Review%20Request%20Pack).
 

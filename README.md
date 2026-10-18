@@ -32,7 +32,7 @@ The **Pro pack** adds:
 
 [Notify me when Pro is out](mailto:aussieflows@mail.grokbot.com?subject=Notify%20me%20-%20Google%20Review%20Request%20Pack).
 
-Don't want to run n8n yourself? A hosted, maintained version (AU, from A$99/month) is being considered. [Join the waitlist](mailto:aussieflows@mail.grokbot.com?subject=Hosted%20waitlist%20-%20Google%20Review%20Request%20Pack).
+Rather not set this up yourself? A done-for-you managed service (we set up, monitor and maintain these automations for your business; AU, from A$99/month) is being considered. [Join the waitlist](mailto:aussieflows@mail.grokbot.com?subject=Hosted%20waitlist%20-%20Google%20Review%20Request%20Pack). One email if it goes ahead or doesn't, then your address is deleted.
 
 ## More free AU workflows
 Other free n8n workflows for Australian small businesses (MIT, same setup style):

@@ -30,6 +30,8 @@ The **Pro pack** adds:
 
 **Want the full Australian version?** The Google Review Request Pack (Pro) adds email, click tracking, a single smart reminder, reply forwarding, holidays, ClickSend and full setup docs. Store link coming soon; questions to aussieflows@mail.grokbot.com.
 
+[Notify me when Pro is out](mailto:aussieflows@mail.grokbot.com?subject=Notify%20me%20-%20Google%20Review%20Request%20Pack).
+
 ## More free AU workflows
 Other free n8n workflows for Australian small businesses (MIT, same setup style):
 - [Missed-Call Text-Back](https://github.com/fletcheri/n8n-missed-call-textback): text back missed callers in seconds

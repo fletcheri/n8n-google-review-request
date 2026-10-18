@@ -32,6 +32,8 @@ The **Pro pack** adds:
 
 [Notify me when Pro is out](mailto:aussieflows@mail.grokbot.com?subject=Notify%20me%20-%20Google%20Review%20Request%20Pack).
 
+Don't want to run n8n yourself? A hosted, maintained version (AU, from A$99/month) is being considered. [Join the waitlist](mailto:aussieflows@mail.grokbot.com?subject=Hosted%20waitlist%20-%20Google%20Review%20Request%20Pack).
+
 ## More free AU workflows
 Other free n8n workflows for Australian small businesses (MIT, same setup style):
 - [Missed-Call Text-Back](https://github.com/fletcheri/n8n-missed-call-textback): text back missed callers in seconds

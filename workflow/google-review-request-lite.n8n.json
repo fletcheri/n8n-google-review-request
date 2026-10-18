@@ -1,0 +1,267 @@
+{
+  "name": "Google Review Request (Lite) v1.0",
+  "nodes": [
+    {
+      "id": "rvl-1",
+      "name": "Sticky: Start here",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -120,
+        -500
+      ],
+      "parameters": {
+        "width": 540,
+        "height": 260,
+        "content": "## Google Review Request (Lite, MIT)\n1. Edit CONFIG in **Decide** (business name, review link, Twilio number + SID).\n2. Add Twilio Basic Auth credentials on **Send SMS (Twilio)**.\n3. Activate. POST `{name, phone}` to `/webhook/review-lite/job-complete`; set your Twilio number's Messaging webhook to `/webhook/review-lite/sms-inbound` (handles STOP).\nWant email, ClickSend, a reminder, click tracking, owner alerts and AU compliance docs? See the Pro pack."
+      }
+    },
+    {
+      "id": "rvl-2",
+      "name": "Job complete",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        -180
+      ],
+      "webhookId": "678989e1-66bb-4e53-a1c6-dea6fae738c0",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "review-lite/job-complete",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "rvl-3",
+      "name": "Every hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 60
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "rvl-4",
+      "name": "Inbound SMS",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        180
+      ],
+      "webhookId": "eef095f0-aeae-4958-a134-3c3f01630a93",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "review-lite/sms-inbound",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "rvl-6",
+      "name": "Decide",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// ========================================================\n// Google Review Request (Lite, MIT) - \"Decide\" node\n// Edit CONFIG below. Leave the rest alone.\n// ========================================================\nconst CONFIG = {\n  businessName: 'Smith Plumbing',             // shown in every SMS (Spam Act: sender identification)\n  timezone: 'Australia/Brisbane',\n  googleReviewUrl: 'https://g.page/r/YOUR-PLACE-ID/review',\n  delayHours: 2,                               // wait this long after \"job complete\"\n  repeatDays: 180,                             // don't ask the same number again within this many days\n  sendWindow: { days: [1, 2, 3, 4, 5], start: '09:00', end: '19:00' }, // 0=Sun..6=Sat\n  sms: {\n    enabled: true, provider: 'twilio',\n    from: '+61491570156',                      // your Twilio AU mobile number\n    twilioAccountSid: 'ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',\n    twilioBaseUrl: 'https://api.twilio.com',\n  },\n  maxMessagesPerDay: 50, maxPerCustomerPerDay: 1, sendOptOutConfirmation: true, sharedSecret: '',\n  templates: {\n    requestSms: \"Hi {name}, thanks for choosing {business}. If you have a minute, an honest Google review really helps a local business: {link} Reply STOP to opt out\",\n    optOutConfirm: \"You won't get more texts from {business}. Reply START to undo.\",\n  },\n};\n// ========================================================\nconst req = $input.first().json;\n\n// ============ Shared engine (leave the rest alone) ============\n// Expects CONFIG and req to be defined above. Everything below is generic plumbing:\n// AU phone handling, time zones, send windows, opt-outs, caps and message queueing.\nconst isWebhook = !!(req && req.headers);\nconst body = isWebhook && req.body && typeof req.body === 'object' ? req.body : {};\nconst query = (isWebhook && req.query) || {};\nconst route = isWebhook ? String(String(req.webhookUrl || '').split('?')[0].split('/').pop() || '').toLowerCase() : 'run-due';\nconst store = $getWorkflowStaticData('global');\nfor (const k of ['optOut', 'counts', 'contacts']) store[k] = store[k] || {};\nstore.records = store.records || {};\nconst hdrKey = isWebhook && req.headers ? (req.headers['x-pack-key'] || '') : '';\nconst keyOk = !CONFIG.sharedSecret || query.key === CONFIG.sharedSecret || hdrKey === CONFIG.sharedSecret;\nlet now = new Date();\nif (CONFIG.allowSimulatedTime && keyOk && (query.now || body.now)) {\n  const t = Date.parse(query.now || body.now);\n  if (!isNaN(t)) now = new Date(t);\n}\nconst TZ = CONFIG.timezone || 'Australia/Brisbane';\nconst DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];\n\nfunction parts(date) {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-AU', { timeZone: TZ, weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date).map(x => [x.type, x.value]));\n  const hh = p.hour === '24' ? '00' : p.hour;\n  return { y: +p.year, m: +p.month, d: +p.day, hh: +hh, mi: +p.minute, dow: DAYS.indexOf(p.weekday), date: `${p.year}-${p.month}-${p.day}`, hhmm: `${hh}:${p.minute}` };\n}\nfunction tzOffsetMs(date) { const p = parts(date); return Date.UTC(p.y, p.m - 1, p.d, p.hh, p.mi) - Math.floor(date.getTime() / 60000) * 60000; }\nfunction zoned(dateStr, hhmm) { // local wall-clock time in CONFIG.timezone -> Date (DST-safe)\n  const [y, m, d] = dateStr.split('-').map(Number); const [h, mi] = String(hhmm || '00:00').split(':').map(Number);\n  const guess = Date.UTC(y, m - 1, d, h, mi); let t = guess - tzOffsetMs(new Date(guess)); t = guess - tzOffsetMs(new Date(t)); return new Date(t);\n}\nfunction addDaysStr(dateStr, n) { const [y, m, d] = dateStr.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); }\nfunction dowOf(dateStr) { return new Date(dateStr + 'T00:00:00Z').getUTCDay(); }\nfunction inClosedown(dateStr) {\n  const c = CONFIG.closedown; if (!c || !c.from || !c.to) return false; const md = dateStr.slice(5);\n  return c.from <= c.to ? (md >= c.from && md <= c.to) : (md >= c.from || md <= c.to);\n}\nfunction isHoliday(dateStr) { return (CONFIG.publicHolidays || []).includes(dateStr) || inClosedown(dateStr); }\nfunction windowFor(dateStr, w) { const d = dowOf(dateStr); const sat = w.saturday && d === 6 ? w.saturday : null; return sat || (w.days.includes(d) ? w : null); }\nfunction isSendDay(dateStr, w) { return !!windowFor(dateStr, w) && !isHoliday(dateStr); }\nfunction nextSendTime(date, w) { // earliest moment >= date inside the send window (skips holidays/closedown)\n  w = w || CONFIG.sendWindow; let ds = parts(date).date;\n  for (let i = 0; i < 90; i++) {\n    if (isSendDay(ds, w)) {\n      const win = windowFor(ds, w); const start = zoned(ds, win.start), end = zoned(ds, win.end);\n      if (i > 0 || date < start) return start;\n      if (date < end) return date;\n    }\n    ds = addDaysStr(ds, 1);\n  }\n  return date;\n}\nfunction inWindow(date, w) { return nextSendTime(date, w).getTime() === date.getTime(); }\nfunction addSendDays(dateStr, n, w) { // n business (send) days after dateStr\n  w = w || CONFIG.sendWindow; let ds = dateStr, c = 0, guard = 0;\n  while (c < n && guard++ < 400) { ds = addDaysStr(ds, 1); if (isSendDay(ds, w)) c++; }\n  return ds;\n}\nfunction validYMD(y, mo, d) { const t = new Date(Date.UTC(+y, +mo - 1, +d)); return t.getUTCFullYear() === +y && t.getUTCMonth() === +mo - 1 && t.getUTCDate() === +d; }\nfunction parseLocal(v) { // ISO with offset, 'YYYY-MM-DD HH:mm', 'YYYY-MM-DD' or AU 'DD/MM/YYYY [HH:mm]' -> Date (null if not a real date)\n  if (v === undefined || v === null || v === '') return null;\n  const s = String(v).trim();\n  let m = s.match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})(?:[ T](\\d{1,2}):(\\d{2}))?$/);\n  if (m) return validYMD(m[3], m[2], m[1]) && +(m[4] || 0) < 24 && +(m[5] || 0) < 60 ? zoned(`${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`, `${m[4] || '00'}:${m[5] || '00'}`) : null;\n  m = s.match(/^((\\d{4})-(\\d{2})-(\\d{2}))(?:[ T](\\d{1,2}):(\\d{2})(?::\\d{2}(?:\\.\\d+)?)?)?$/);\n  if (m) return validYMD(m[2], m[3], m[4]) && +(m[5] || 0) < 24 && +(m[6] || 0) < 60 ? zoned(m[1], `${m[5] || '00'}:${m[6] || '00'}`) : null;\n  const t = Date.parse(s); return isNaN(t) ? null : new Date(t);\n}\nfunction fmtDay(date) { return new Intl.DateTimeFormat('en-AU', { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'short' }).format(date).replace(',', ''); }\nfunction fmtTime(date) { const p = parts(date); const h = p.hh % 12 || 12; return `${h}${p.mi ? ':' + String(p.mi).padStart(2, '0') : ''}${p.hh < 12 ? 'am' : 'pm'}`; }\nfunction fmtDMY(dateOrStr) { const s = typeof dateOrStr === 'string' ? dateOrStr : parts(dateOrStr).date; const [y, m, d] = s.split('-'); return `${d}/${m}/${y}`; }\nfunction aud(n) { return 'A$' + Number(n || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }\nfunction money(v) { if (typeof v === 'number') return isFinite(v) ? Math.round(v * 100) / 100 : NaN; const t = String(v === undefined || v === null ? '' : v).replace(/[\\s,$]|A\\$|AUD/gi, ''); if (!/^-?\\d+(\\.\\d+)?$/.test(t)) return NaN; return Math.round(Number(t) * 100) / 100; }\n\nfunction toE164AU(raw) {\n  if (raw === undefined || raw === null) return null;\n  let s = String(raw).trim().replace(/[\\s\\-().]/g, '');\n  if (!s) return null;\n  if (s.startsWith('00')) s = '+' + s.slice(2);\n  if (/^0[2-9]\\d{8}$/.test(s)) s = '+61' + s.slice(1);\n  else if (/^61[2-9]\\d{8}$/.test(s)) s = '+' + s;\n  else if (/^[2-9]\\d{8}$/.test(s)) s = '+61' + s;\n  return /^\\+\\d{8,15}$/.test(s) ? s : null;\n}\nconst isAuMobile = n => /^\\+614\\d{8}$/.test(n || '');\nconst isEmail = e => /^[^\\s@<>\"']+@[^\\s@<>\"']+\\.[^\\s@<>\"']{2,}$/.test(String(e || ''));\nconst clean = (v, max) => String(v === undefined || v === null ? '' : v).replace(/[\\r\\n\\t]+/g, ' ').replace(/\\s{2,}/g, ' ').trim().slice(0, max || 200);\nconst fill = (tpl, vars) => String(tpl || '').replace(/\\{(\\w+)\\}/g, (m, k) => (vars[k] !== undefined && vars[k] !== null ? String(vars[k]) : m));\nconst esc = s => String(s === undefined || s === null ? '' : s).replace(/[&<>\"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]));\nfunction fnv(str) { let h = 0x811c9dc5; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(36); }\nfunction token(ref) { return `${ref}.${fnv(ref + '|' + (CONFIG.sharedSecret || '') + '|' + CONFIG.businessName)}`; }\nfunction fromToken(t) { const ref = String(t || '').split('.')[0]; return ref && token(ref) === String(t) ? ref : null; }\nfunction newRef(prefix) { return prefix + parts(now).date.slice(2).replace(/-/g, '') + '-' + Math.random().toString(36).slice(2, 6).toUpperCase(); }\nfunction firstName(n) { return clean(n, 80).split(' ')[0] || 'there'; }\n\nconst owner = toE164AU(CONFIG.ownerMobile);\nconst messages = [];\nconst notes = [];\nconst today = parts(now).date;\nfunction dayBucket() { if (!store.counts[today]) store.counts = { [today]: { total: 0, per: {} } }; return store.counts[today]; }\nfunction optedOut(addr) { return !!(addr && store.optOut[String(addr).toLowerCase()]); }\nfunction optOut(addr, why) { if (addr) store.optOut[String(addr).toLowerCase()] = { at: now.toISOString(), why: why || 'stop' }; }\nfunction weeklyOk(key) { // contact-frequency guard per customer (rolling 7 and 30 days)\n  const lim = CONFIG.contactLimits; if (!lim || !key) return true;\n  const list = (store.contacts[key] || []).filter(t => now.getTime() - t < 30 * 86400000); store.contacts[key] = list;\n  const week = list.filter(t => now.getTime() - t < 7 * 86400000).length;\n  return week < lim.perWeek && list.length < lim.perMonth;\n}\nfunction noteContact(key) { if (CONFIG.contactLimits && key) (store.contacts[key] = store.contacts[key] || []).push(now.getTime()); }\nfunction sentToday(to) { const k = String(to).toLowerCase(); return (dayBucket().per[k] || dayBucket().per[to] || 0) + messages.filter(m => m.purpose !== 'owner' && String(m.to).toLowerCase() === k).length; }\nfunction canSms(to, opts) {\n  opts = opts || {};\n  if (!CONFIG.sms || !CONFIG.sms.enabled) { notes.push('sms channel disabled'); return false; }\n  if (!isAuMobile(to)) { notes.push(`not an AU mobile: ${to}`); return false; }\n  if (!opts.owner && optedOut(to)) { notes.push(`opted out: ${to}`); return false; }\n  const day = dayBucket();\n  if (day.total + messages.length >= CONFIG.maxMessagesPerDay) { notes.push('daily cap reached'); return false; }\n  if (!opts.owner && sentToday(to) >= CONFIG.maxPerCustomerPerDay) { notes.push(`per-customer cap reached: ${to}`); return false; }\n  return true;\n}\nfunction canEmail(to, opts) {\n  opts = opts || {};\n  if (!CONFIG.email || !CONFIG.email.enabled) { notes.push('email channel disabled'); return false; }\n  if (!isEmail(to)) { notes.push(`invalid email: ${to}`); return false; }\n  if (!opts.owner && optedOut(to)) { notes.push(`opted out: ${to}`); return false; }\n  const day = dayBucket();\n  if (day.total + messages.length >= CONFIG.maxMessagesPerDay) { notes.push('daily cap reached'); return false; }\n  if (!opts.owner && sentToday(to) >= CONFIG.maxPerCustomerPerDay) { notes.push(`per-customer cap reached: ${to}`); return false; }\n  return true;\n}\nfunction queueSms(to, text, purpose, ref) { messages.push({ channel: 'sms', to, from: CONFIG.sms.from, body: clean(text, 640), purpose, ref: ref || '' }); }\nfunction queueEmail(to, subject, text, html, purpose, ref) { messages.push({ channel: 'email', to, from: CONFIG.email.from, replyTo: CONFIG.email.replyTo || '', subject: clean(subject, 160), text, html, purpose, ref: ref || '' }); }\nfunction alertOwner(text, ref) {\n  if (!CONFIG.ownerAlerts) return;\n  if (owner && canSms(owner, { owner: true })) queueSms(owner, text, 'owner', ref);\n  if (CONFIG.ownerEmail && canEmail(CONFIG.ownerEmail, { owner: true })) queueEmail(CONFIG.ownerEmail, `[${CONFIG.businessName}] ${clean(text, 70)}`, text, `<p>${esc(text)}</p>`, 'owner', ref);\n}\nfunction unsubUrl(ref) { return `${CONFIG.publicBaseUrl}/unsubscribe?t=${encodeURIComponent(token(ref))}`; }\nfunction emailHtml(paras, cta, ref) { // simple, mobile-friendly, plain-looking HTML email with sender ID + unsubscribe\n  const p = paras.filter(Boolean).map(x => `<p style=\"margin:0 0 14px\">${esc(x)}</p>`).join('');\n  const b = cta && cta.url ? `<p style=\"margin:18px 0\"><a href=\"${esc(cta.url)}\" style=\"background:${CONFIG.email.brandColour || '#0b5fff'};color:#fff;text-decoration:none;padding:12px 18px;border-radius:6px;display:inline-block;font-weight:600\">${esc(cta.text)}</a></p>` : '';\n  const extra = (CONFIG.email.footerLines || []).filter(Boolean).map(esc).join('<br>');\n  return `<!doctype html><html><body style=\"margin:0;background:#f4f5f7\"><div style=\"max-width:560px;margin:0 auto;padding:24px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#1d2433;background:#fff\">${p}${b}<hr style=\"border:none;border-top:1px solid #e3e6eb;margin:22px 0\"><p style=\"font-size:12px;color:#6b7280;margin:0\">${esc(CONFIG.businessName)}${CONFIG.abn ? ' &middot; ABN ' + esc(CONFIG.abn) : ''}${extra ? '<br>' + extra : ''}<br>Don't want these emails? <a href=\"${esc(unsubUrl(ref))}\" style=\"color:#6b7280\">Unsubscribe</a>.</p></div></body></html>`;\n}\nfunction emailText(paras, cta, ref) {\n  return paras.filter(Boolean).join('\\n\\n') + (cta && cta.url ? `\\n\\n${cta.text}: ${cta.url}` : '') + `\\n\\n--\\n${CONFIG.businessName}${CONFIG.abn ? ' | ABN ' + CONFIG.abn : ''}\\nUnsubscribe: ${unsubUrl(ref)}`;\n}\nconst STOP_RE = CONFIG.cancelMeansOptOut === false ? /^\\s*(stop|stopall|unsubscribe|cancel all|end|quit|opt ?out)\\b/i : /^\\s*(stop|stopall|unsubscribe|cancel|end|quit|opt ?out)\\b/i;\nconst START_RE = /^\\s*(start|unstop|subscribe)\\b/i;\nfunction inboundFields() {\n  return { from: toE164AU(body.From || body.from || body.sender || body.msisdn), text: clean(body.Body || body.body || body.message || body.text, 600), isTwilio: !!(body.MessageSid || body.AccountSid) };\n}\nfunction smsReplyResponse(isTwilio, action) {\n  return isTwilio ? { kind: 'normal', status: 200, contentType: 'text/xml', body: '<?xml version=\"1.0\" encoding=\"UTF-8\"?><Response></Response>' }\n    : { kind: 'normal', status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, action }) };\n}\nfunction json(status, obj) { return { kind: 'normal', status, contentType: 'application/json', body: JSON.stringify(obj) }; }\nfunction page(title, text, status) {\n  return { kind: 'normal', status: status || 200, contentType: 'text/html; charset=utf-8', body: `<!doctype html><meta name=viewport content=\"width=device-width\"><title>${esc(title)}</title><body style=\"font-family:Arial,sans-serif;max-width:32rem;margin:3rem auto;padding:0 1rem;color:#1d2433\"><h2>${esc(title)}</h2><p>${esc(text)}</p><p style=\"color:#6b7280\">${esc(CONFIG.businessName)}</p></body>` };\n}\nfunction handleUnsubscribe(recordsWithContacts) {\n  const ref = fromToken(query.t);\n  const rec = ref && store.records[ref];\n  if (!rec) return { action: 'unsubscribe:invalid', response: page('Link not recognised', 'This unsubscribe link is invalid or has expired. Reply to any of our messages and we will remove you.', 400) };\n  for (const a of [rec.email, rec.phone]) optOut(a, 'unsubscribe-link');\n  return { action: 'unsubscribe:ok', response: page(\"You're unsubscribed\", `You won't get any more automated messages from ${CONFIG.businessName}.`) };\n}\nfunction handleStopStart(from, text) { // returns action string or null\n  if (STOP_RE.test(text)) {\n    const already = optedOut(from);\n    optOut(from, 'sms-stop');\n    for (const r of Object.values(store.records)) if (r.phone === from && r.email) optOut(r.email, 'sms-stop'); // one opt-out covers all channels\n    if (CONFIG.sendOptOutConfirmation && !already && isAuMobile(from) && CONFIG.sms.enabled) queueSms(from, fill(CONFIG.templates.optOutConfirm, { business: CONFIG.businessName }), 'customer:opt-out-confirm');\n    return 'sms-inbound:opt-out';\n  }\n  if (START_RE.test(text)) {\n    delete store.optOut[from];\n    for (const r of Object.values(store.records)) if (r.phone === from && r.email) delete store.optOut[String(r.email).toLowerCase()];\n    return 'sms-inbound:opt-in';\n  }\n  return null;\n}\nfunction finish(action, response, extra) {\n  if (messages.length) {\n    const day = dayBucket();\n    for (const m of messages) { day.total++; const k = String(m.to).toLowerCase(); if (m.purpose !== 'owner') day.per[k] = (day.per[k] || 0) + 1; }\n  }\n  return [{ json: Object.assign({\n    route, action, at: now.toISOString(), notes, messages, response: response || { kind: 'none' },\n    smsProvider: CONFIG.sms ? CONFIG.sms.provider : 'dryrun', emailProvider: CONFIG.email ? CONFIG.email.provider : 'dryrun',\n    sms: CONFIG.sms ? { twilioAccountSid: CONFIG.sms.twilioAccountSid, twilioBaseUrl: CONFIG.sms.twilioBaseUrl, clicksendBaseUrl: CONFIG.sms.clicksendBaseUrl } : {},\n  }, extra || {}) }];\n}\nfunction pruneRecords(maxAgeDays, maxCount) {\n  const ids = Object.keys(store.records);\n  for (const id of ids) { const r = store.records[id]; if (now.getTime() - Date.parse(r.createdAt) > maxAgeDays * 86400000) delete store.records[id]; }\n  const left = Object.values(store.records).sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));\n  while (left.length > maxCount) delete store.records[left.shift().ref];\n}\n// ============ end of shared engine ============\n\n// ---- Lite logic: one review request per job, SMS only ----\nfunction processDue() {\n  let sent = 0;\n  if (!inWindow(now)) return 0;\n  for (const r of Object.values(store.records)) {\n    if (r.stage !== 'scheduled' || Date.parse(r.dueAt) > now.getTime()) continue;\n    if (canSms(r.phone)) { queueSms(r.phone, fill(CONFIG.templates.requestSms, { name: firstName(r.name), business: CONFIG.businessName, link: CONFIG.googleReviewUrl }), 'customer:review-request', r.ref); sent++; r.stage = 'requested'; }\n    else r.stage = 'skipped';\n  }\n  return sent;\n}\nlet action = 'none', response = json(404, { ok: false, error: 'unknown route' });\nif (['job-complete', 'sms-inbound'].includes(route) && !keyOk) { action = 'rejected:bad-key'; response = json(403, { ok: false, error: 'forbidden' }); }\nelse if (route === 'job-complete') {\n  const phone = toE164AU(body.phone || body.mobile), name = clean(body.name, 80);\n  store.asked = store.asked || {};\n  if (!name || !isAuMobile(phone)) { action = 'job-complete:invalid'; response = json(400, { ok: false, errors: ['name and an AU mobile are required'] }); }\n  else if (optedOut(phone) || (store.asked[phone] && now.getTime() - store.asked[phone] < CONFIG.repeatDays * 86400000)) { action = 'job-complete:skipped'; response = json(200, { ok: true, scheduled: false }); }\n  else {\n    const ref = newRef('R');\n    store.records[ref] = { ref, name, phone, createdAt: now.toISOString(), stage: 'scheduled', dueAt: nextSendTime(new Date(now.getTime() + CONFIG.delayHours * 3600000)).toISOString() };\n    store.asked[phone] = now.getTime();\n    processDue();\n    action = 'job-complete:' + store.records[ref].stage; response = json(200, { ok: true, ref, sendAt: store.records[ref].dueAt });\n  }\n} else if (route === 'run-due') { const n = processDue(); action = `run-due:${n}-sent`; }\nelse if (route === 'sms-inbound') {\n  const { from, text, isTwilio } = inboundFields();\n  action = (from && handleStopStart(from, text)) || 'sms-inbound:ignored';\n  response = smsReplyResponse(isTwilio, action);\n}\npruneRecords(200, 1000);\nreturn finish(action, response);\n"
+      }
+    },
+    {
+      "id": "rvl-7",
+      "name": "Reply needed?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        500,
+        0
+      ],
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{ $json.response.kind === 'normal' ? 0 : 1 }}"
+      }
+    },
+    {
+      "id": "rvl-8",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        740,
+        -120
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.response.body }}",
+        "options": {
+          "responseCode": "={{ $json.response.status }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "={{ $json.response.contentType }}"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "rvl-9",
+      "name": "Anything to send?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        980,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// One item per message; nothing if there is nothing to send\nconst d = $('Decide').first().json;\nreturn (d.messages || []).map(m => ({ json: { ...m, sms: d.sms } }));"
+      }
+    },
+    {
+      "id": "rvl-5",
+      "name": "Send SMS (Twilio)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1220,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.sms.twilioBaseUrl }}/2010-04-01/Accounts/{{ $json.sms.twilioAccountSid }}/Messages.json",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "To",
+              "value": "={{ $json.to }}"
+            },
+            {
+              "name": "From",
+              "value": "={{ $json.from }}"
+            },
+            {
+              "name": "Body",
+              "value": "={{ $json.body }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Job complete": {
+      "main": [
+        [
+          {
+            "node": "Decide",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every hour": {
+      "main": [
+        [
+          {
+            "node": "Decide",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inbound SMS": {
+      "main": [
+        [
+          {
+            "node": "Decide",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide": {
+      "main": [
+        [
+          {
+            "node": "Reply needed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply needed?": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Anything to send?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond": {
+      "main": [
+        [
+          {
+            "node": "Anything to send?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anything to send?": {
+      "main": [
+        [
+          {
+            "node": "Send SMS (Twilio)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Australia/Brisbane"
+  },
+  "pinData": {}
+}

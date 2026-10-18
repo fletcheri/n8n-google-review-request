@@ -9,6 +9,8 @@ When a job is done, the customer gets one friendly SMS with your Google review l
 - No review gating: everyone gets the same honest ask (Google policy / ACCC)
 - Daily SMS cap and optional webhook secret (`sharedSecret`)
 
+Tested end-to-end in n8n with simulated APIs (a local mock of the Twilio API); no live SMS or email provider was used in testing.
+
 ## Setup (about 15 minutes)
 1. n8n → **Import from file** → `workflow/google-review-request-lite.n8n.json`.
 2. Open **Decide** and set `businessName`, `googleReviewUrl` (Google Business Profile → Ask for reviews), `sms.from` (your Twilio AU mobile in +61 format) and `sms.twilioAccountSid`.
